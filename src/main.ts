@@ -1,99 +1,75 @@
-import {App, Editor, MarkdownView, Modal, Notice, Plugin} from 'obsidian';
-import {DEFAULT_SETTINGS, MyPluginSettings, SampleSettingTab} from "./settings";
+import { Plugin, WorkspaceLeaf } from 'obsidian';
+import { IndexStore } from './index-store';
+import { DEFAULT_SETTINGS, PMSettings, PMSettingTab } from './settings';
+import { TagSuggest } from './suggester/tag-suggest';
+import { CentralView, VIEW_TYPE_PM_CENTRAL } from './views/central-view';
+import { TagManagerModal } from './views/tag-manager';
 
-// Remember to rename these classes and interfaces!
+export default class ProjectItemsPlugin extends Plugin {
+	settings: PMSettings;
+	store: IndexStore;
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
-
-	async onload() {
+	async onload(): Promise<void> {
 		await this.loadSettings();
 
-		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Sample', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
+		this.store = new IndexStore(this, {
+			dimensions: this.settings.dimensions,
+			treeDimId: this.settings.treeDimId,
+			debounceMs: this.settings.debounceMs,
+			rootFolder: this.settings.rootFolder,
 		});
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
+		this.registerView(VIEW_TYPE_PM_CENTRAL, (leaf: WorkspaceLeaf) => new CentralView(leaf, this.store));
+		this.registerEditorSuggest(new TagSuggest(this.app, this.store));
 
-		// This adds a simple command that can be triggered anywhere
+		this.addRibbonIcon('list-checks', 'Project items', () => void this.activateView());
+
 		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
+			id: 'open-central',
+			name: 'Open central view',
+			callback: () => void this.activateView(),
 		});
-		// This adds an editor command that can perform some operation on the current editor instance
 		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				editor.replaceSelection('Sample editor command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-				return false;
-			}
+			id: 'open-tag-manager',
+			name: 'Open dimension manager',
+			callback: () => new TagManagerModal(this.app, this).open(),
 		});
 
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
+		this.addSettingTab(new PMSettingTab(this.app, this));
 
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			new Notice("Click");
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-
+		// Defer initial scan until layout is ready so it doesn't block startup.
+		this.app.workspace.onLayoutReady(() => void this.store.start());
 	}
 
-	onunload() {
+	onunload(): void {
+		// register* helpers handle teardown.
 	}
 
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<MyPluginSettings>);
+	async loadSettings(): Promise<void> {
+		const data = (await this.loadData()) as Partial<PMSettings> | null;
+		this.settings = { ...DEFAULT_SETTINGS, ...(data ?? {}) };
 	}
 
-	async saveSettings() {
+	async persist(): Promise<void> {
 		await this.saveData(this.settings);
-	}
-}
-
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		let {contentEl} = this;
-		contentEl.setText('Woah!');
+		this.store?.updateConfig({
+			dimensions: this.settings.dimensions,
+			treeDimId: this.settings.treeDimId,
+			debounceMs: this.settings.debounceMs,
+			rootFolder: this.settings.rootFolder,
+		});
 	}
 
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
+	async activateView(): Promise<void> {
+		const { workspace } = this.app;
+		const existing = workspace.getLeavesOfType(VIEW_TYPE_PM_CENTRAL);
+		if (existing.length > 0) {
+			await workspace.revealLeaf(existing[0]!);
+			return;
+		}
+		const leaf = workspace.getRightLeaf(false);
+		if (!leaf) return;
+		await leaf.setViewState({ type: VIEW_TYPE_PM_CENTRAL, active: true });
+		await workspace.revealLeaf(leaf);
 	}
 }

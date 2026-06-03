@@ -1,8 +1,256 @@
-/*
+/* ===== Project items plugin ===== */
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+/* Layout */
+.pm-central {
+	display: flex;
+	height: 100%;
+	overflow: hidden;
+	font-size: var(--font-ui-small);
+}
+.pm-sidebar {
+	width: 200px;
+	flex-shrink: 0;
+	border-right: 1px solid var(--background-modifier-border);
+	padding: 8px;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+.pm-main {
+	flex: 1;
+	overflow-y: auto;
+	padding: 4px 10px 8px;
+}
 
-If your plugin does not need CSS, delete this file.
+/* Sidebar sections */
+.pm-sidebar-section { display: flex; flex-direction: column; gap: 3px; }
+.pm-sidebar-label {
+	font-weight: 700;
+	font-size: 10px;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--text-muted);
+	padding-bottom: 2px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	margin-bottom: 2px;
+}
+.pm-sidebar-footer {
+	margin-top: auto;
+	padding-top: 8px;
+	display: flex;
+	gap: 4px;
+	flex-wrap: wrap;
+}
 
-*/
+/* Stats */
+.pm-stat-row { display: flex; justify-content: space-between; font-size: 11px; }
+.pm-stat-label { color: var(--text-muted); }
+.pm-stat-val { font-weight: 600; }
+
+/* Type status colors */
+.pm-type-todo    { color: var(--text-muted); }
+.pm-type-doing   { color: #e8832a; }
+.pm-type-done    { color: #5a9e5a; }
+.pm-type-cancelled { color: #b8a020; }
+
+/* Sidebar filter options */
+.pm-filter-option {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	padding: 1px 4px;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 12px;
+	color: var(--text-muted);
+}
+.pm-filter-option:hover { background: var(--background-modifier-hover); }
+.pm-filter-option.is-active { color: var(--text-normal); font-weight: 500; }
+.pm-filter-input { margin: 0; flex-shrink: 0; pointer-events: none; }
+.pm-filter-count { margin-left: auto; color: var(--text-faint); font-size: 11px; font-weight: 600; padding-left: 4px; }
+.pm-filter-warn { color: var(--text-faint); font-style: italic; cursor: default; }
+.pm-filter-label-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-filter-task-sub { padding-left: 14px; }
+
+
+/* Inherit color from parent .pm-type-* on filter options */
+.pm-type-todo    .pm-filter-label-text { color: var(--text-muted); }
+.pm-type-doing   .pm-filter-label-text { color: #e8832a; }
+.pm-type-done    .pm-filter-label-text { color: #5a9e5a; }
+.pm-type-cancelled .pm-filter-label-text { color: #b8a020; }
+
+.pm-filter-empty { color: var(--text-faint); font-size: 11px; padding: 2px 4px; }
+
+/* Main area header (Tree / Date toggle) */
+.pm-main-header {
+	display: flex;
+	gap: 4px;
+	padding: 4px 0 6px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	margin-bottom: 6px;
+}
+.pm-group-btn { font-size: 11px; padding: 1px 8px; }
+.pm-group-btn.is-active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+/* chips */
+.pm-chip {
+	display: inline-block;
+	padding: 0 6px;
+	margin-left: 4px;
+	border-radius: 8px;
+	font-size: 11px;
+	background: var(--background-modifier-hover);
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+.pm-chip-tree { background: rgba(100, 150, 255, 0.18); }
+.pm-chip-type { background: rgba(255, 200, 80, 0.20); }
+.pm-chip-time { background: rgba(160, 200, 120, 0.20); }
+.pm-chip-free {
+	background: transparent;
+	border: 1px solid var(--background-modifier-border);
+	font-family: var(--font-monospace);
+	color: var(--text-faint);
+}
+
+/* tree */
+.pm-tree-section {}
+.pm-tree-header {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 0;
+	color: var(--text-normal);
+}
+.pm-tree-name { font-weight: 600; }
+.pm-tree-count { color: var(--text-faint); font-size: 11px; }
+
+/* date grouping */
+.pm-date-section { margin-bottom: 12px; }
+.pm-date-header {
+	font-size: 11px;
+	font-weight: 600;
+	color: var(--text-muted);
+	padding: 2px 8px;
+	margin-bottom: 2px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+.pm-date-undated { color: var(--text-faint); font-style: italic; }
+
+/* sprint grouping */
+.pm-sprint-section { margin-bottom: 14px; }
+.pm-sprint-header {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	padding: 3px 8px;
+	margin-bottom: 2px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+.pm-sprint-num { font-weight: 700; font-size: 12px; }
+.pm-sprint-range { color: var(--text-muted); font-size: 11px; }
+.pm-sprint-count { margin-left: auto; color: var(--text-faint); font-size: 11px; font-weight: 600; }
+.pm-sprint-undated { color: var(--text-faint); font-style: italic; }
+
+/* item rows */
+.pm-item {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 1px 0;
+	min-height: 22px;
+}
+.pm-item-text {
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.pm-task-cb { margin: 0; }
+.pm-bullet { color: var(--text-muted); width: 12px; text-align: center; }
+
+/* Status colors on item rows */
+.pm-status-todo .pm-item-text    { color: var(--text-muted); }
+.pm-status-doing .pm-item-text   { color: #e8832a; }
+.pm-status-done .pm-item-text    { text-decoration: line-through; color: #5a9e5a; }
+.pm-status-cancelled .pm-item-text { text-decoration: line-through; color: #b8a020; }
+
+.pm-item-knowledge .pm-item-text { color: var(--text-normal); }
+.pm-item-index .pm-item-text { color: var(--text-muted); font-style: italic; }
+
+.pm-empty { color: var(--text-muted); padding: 12px; text-align: center; }
+
+/* dimension manager modal */
+.pm-dim-manager h3 { margin: 14px 0 6px; font-size: 13px; border-bottom: 1px solid var(--background-modifier-border); padding-bottom: 4px; }
+
+.pm-dm-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 5px 4px;
+	border-radius: 4px;
+	min-height: 32px;
+}
+.pm-dm-row:hover { background: var(--background-modifier-hover); }
+.pm-dm-id { font-family: var(--font-monospace); font-size: 11px; color: var(--text-muted); min-width: 56px; }
+.pm-dm-name { font-weight: 500; flex: 1; }
+.pm-dm-kind {
+	font-size: 10px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	padding: 1px 6px;
+	border-radius: 8px;
+	background: var(--background-modifier-hover);
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+.pm-dm-kind-label { background: transparent; }
+.pm-dm-values { font-size: 11px; color: var(--text-muted); flex: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-dm-values-empty { color: var(--text-faint); font-style: italic; }
+.pm-dm-actions { display: flex; gap: 4px; margin-left: auto; flex-shrink: 0; }
+.pm-dm-delete { color: var(--text-error); }
+
+.pm-dm-form {
+	background: var(--background-secondary);
+	border-radius: 6px;
+	padding: 12px;
+	margin: 6px 0;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+.pm-dm-form-add { margin-top: 12px; border: 1px solid var(--background-modifier-border); }
+.pm-dm-form-id { font-family: var(--font-monospace); font-size: 13px; font-weight: 700; color: var(--text-accent); margin-bottom: 4px; }
+.pm-dm-form-row { display: flex; align-items: flex-start; gap: 10px; }
+.pm-dm-form-row label { width: 56px; flex-shrink: 0; font-size: 12px; color: var(--text-muted); padding-top: 5px; }
+.pm-dm-form-row input, .pm-dm-form-row select { flex: 1; min-width: 0; }
+.pm-dm-values-input { flex: 1; font-family: var(--font-monospace); font-size: 12px; resize: vertical; }
+.pm-dm-hint { font-size: 11px; color: var(--text-faint); font-style: italic; margin-top: 2px; padding-left: 66px; }
+.pm-dm-form-btns { display: flex; gap: 6px; justify-content: flex-end; margin-top: 4px; }
+.pm-dm-footer { margin-top: 14px; }
+
+/* sync modal */
+.pm-sync .pm-sync-section { margin-bottom: 16px; }
+.pm-sync .pm-sync-list { padding-left: 0; list-style: none; }
+.pm-sync .pm-sync-list li { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.pm-sync .pm-sync-text { flex: 1; }
+.pm-sync .pm-sync-loc { color: var(--text-faint); font-size: 11px; }
+.pm-sync .pm-sync-empty { color: var(--text-muted); }
+
+/* tag suggester rows */
+.pm-suggest-row { display: flex; align-items: center; gap: 8px; width: 100%; }
+.pm-suggest-tag {
+	flex: 1;
+	font-family: var(--font-monospace);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.pm-suggest-dim { margin-left: auto; font-size: 10px; }
+.pm-suggest-infile::before { content: "★ "; color: var(--text-accent); }

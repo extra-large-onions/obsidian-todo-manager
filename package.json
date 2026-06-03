@@ -1,7 +1,7 @@
 {
-	"name": "obsidian-sample-plugin",
-	"version": "1.0.0",
-	"description": "This is a sample plugin for Obsidian (https://obsidian.md)",
+	"name": "obsidian-project-items",
+	"version": "0.1.0",
+	"description": "Central view of tasks, knowledge, and index lines organized by hierarchical tag dimensions.",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {
