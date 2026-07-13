@@ -7,12 +7,15 @@
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"build:ai": "esbuild ai/todos-cli.ts --bundle --platform=node --format=cjs --outfile=ai/todos-cli.cjs",
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"lint": "eslint ."
 	},
 	"keywords": [],
 	"license": "0-BSD",
 	"devDependencies": {
+		"@codemirror/state": "^6.5.0",
+		"@codemirror/view": "^6.38.6",
 		"@types/node": "^16.11.6",
 		"esbuild": "0.25.5",
 		"eslint-plugin-obsidianmd": "0.1.9",

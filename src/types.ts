@@ -21,6 +21,8 @@ export interface Item {
 	loc: SourceLoc;
 	tags: string[];           // raw tag strings (without leading '#'), e.g. "deployment/startup-sequence"
 	meta: MetaPair[];         // parsed key:value pairs
+	section: string[];        // heading path above this line, outermost first, e.g. ["Deployment", "Startup"]
+	uncategorized: boolean;   // sits after a `---` separator within its section → topic is "Uncategorized"
 	status?: TaskStatus;      // tasks only
 	children: Item[];
 }

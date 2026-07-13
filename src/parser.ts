@@ -8,6 +8,8 @@ interface ParseOptions {
 const TASK_RE = /^(\s*)[-*+]\s+\[(.)\]\s?(.*)$/;
 const LIST_RE = /^(\s*)[-*+]\s+(.*)$/;
 const TAG_RE = /(?:^|\s)#([A-Za-z][A-Za-z0-9/_-]*)/g;
+// ATX heading: 1–6 leading '#', a space, then the title. Trailing closing '#'s are ignored.
+const HEADING_RE = /^(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/;
 
 function parseStatus(box: string): TaskStatus {
 	switch (box.toLowerCase()) {
@@ -57,20 +59,58 @@ function escapeRe(s: string): string {
 /**
  * Parse a markdown file's text into top-level items.
  * Children are nested by indent (any indent > parent's indent attaches as child).
+ * Markdown headings define the topic path: each item records the stack of
+ * enclosing heading titles in `section` (outermost first). Headings are
+ * structure, not items — they are not emitted into the returned forest.
  */
 export function parseFile(text: string, opts: ParseOptions): Item[] {
 	const lines = text.split(/\r?\n/);
 	const top: Item[] = [];
 	// stack of (indent, item) for current open ancestors
 	const stack: Item[] = [];
+	// stack of enclosing headings, shallowest first
+	const sections: { level: number; title: string }[] = [];
+	// true once a `---` separator is seen; reset by the next heading. Items while
+	// true are "uncategorized" regardless of the heading they sit under.
+	let uncategorized = false;
 
-	for (let i = 0; i < lines.length; i++) {
+	let start = 0;
+	// Skip a leading YAML frontmatter block so its keys aren't parsed as items.
+	if (lines[0] !== undefined && /^---\s*$/.test(lines[0])) {
+		const end = lines.findIndex((l, idx) => idx > 0 && /^---\s*$/.test(l));
+		if (end !== -1) start = end + 1;
+	}
+
+	for (let i = start; i < lines.length; i++) {
 		const raw = lines[i];
 		if (raw === undefined) continue;
 		if (raw.trim() === '') continue;
 
+		const heading = raw.match(HEADING_RE);
+		if (heading) {
+			const level = heading[1]!.length;
+			const title = (heading[2] ?? '').trim();
+			// pop equal-or-deeper headings, then push this one
+			while (sections.length > 0 && sections[sections.length - 1]!.level >= level) sections.pop();
+			if (title !== '') sections.push({ level, title });
+			// a heading breaks any open list nesting and ends the uncategorized run
+			stack.length = 0;
+			uncategorized = false;
+			continue;
+		}
+
+		// A thematic break (`---`, ignoring any %% ... %% comment) starts the
+		// uncategorized run for the rest of this section. It is not an item.
+		if (/^-{3,}$/.test(raw.replace(/%%[^%]*%%/g, '').trim())) {
+			uncategorized = true;
+			stack.length = 0;
+			continue;
+		}
+
 		const item = lineToItem(raw, i, opts);
 		if (!item) continue;
+		item.section = sections.map(s => s.title);
+		item.uncategorized = uncategorized;
 
 		// pop ancestors with indent >= this item's indent
 		while (stack.length > 0) {
@@ -136,6 +176,8 @@ function makeItem(
 		loc: { path: opts.path, line: lineNo, indent },
 		tags,
 		meta,
+		section: [],
+		uncategorized: false,
 		status,
 		children: [],
 	};

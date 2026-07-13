@@ -1,16 +1,18 @@
-# Obsidian Sample Plugin
+# Project Items
 
-This is a sample plugin for Obsidian (https://obsidian.md).
+An Obsidian plugin that turns your notes into a filterable project view. It scans the vault for **items** — tasks (`- [ ]`), knowledge bullets (`- …`), and index lines — and organizes them by **topic**, where a topic is simply the **markdown heading** an item lives under. No per-line topic tags to author; dates and labels stay out of the way via an editor **conceal** feature.
 
-This project uses TypeScript to provide type checking and documentation.
-The repo depends on the latest plugin API (obsidian.d.ts) in TypeScript Definition format, which contains TSDoc comments describing what it does.
+**Highlights**
+- **Headings are topics.** Nest headings to nest topics; items inherit the heading above them.
+- **Central view** with sidebar filtering and four groupings: Outline, Topics (merge same-named headings across the vault), Date, and Sprint.
+- **Conceal** hides `%% … %%` metadata (and optionally `#tags`) while editing, revealing the raw line only under the cursor.
+- **AI curation, safely** — an AI can label, move, and de-duplicate items through a capability-limited CLI that mechanically refuses to edit your prose or lose data.
 
-This sample plugin demonstrates some of the basic functionality the plugin API can do.
-- Adds a ribbon icon, which shows a Notice when clicked.
-- Adds a command "Open modal (simple)" which opens a Modal.
-- Adds a plugin setting tab to the settings page.
-- Registers a global click event and output 'click' to the console.
-- Registers a global interval which logs 'setInterval' to the console.
+**Docs:** [`GUIDE.md`](GUIDE.md) (concepts & usage) · [`architecture.md`](architecture.md) (internals) · [`CLAUDE.md`](CLAUDE.md) + [`ai/SAMPLE_PROMPT.md`](ai/SAMPLE_PROMPT.md) (AI curation).
+
+**Build:** `npm i`, then `npm run dev` (watch) or `npm run build` (production). Build the AI tool with `npm run build:ai`.
+
+---
 
 ## First time developing plugins?
 

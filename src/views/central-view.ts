@@ -1,7 +1,10 @@
 import { ItemView, Notice, TFile, WorkspaceLeaf, debounce } from 'obsidian';
 import { IndexStore } from '../index-store';
 import { Dimension, Item } from '../types';
-import { dimensionsOf, freeTags, matchesFilter, treePathOf } from '../tags';
+import { UNCATEGORIZED, dimensionsOf, freeTags, matchesFilter, treePathOf } from '../tags';
+import { stampMissingDates } from '../reconcile';
+import { parseDimensionsText, serializeDimensions } from '../dimensions-format';
+import type ProjectItemsPlugin from '../main';
 
 export const VIEW_TYPE_PM_CENTRAL = 'pm-central-view';
 
@@ -77,10 +80,11 @@ const TYPE_TASK_VALUES: { val: string; label: string; cls: string }[] = [
 
 export class CentralView extends ItemView {
 	private filter = new Map<string, Set<string>>();
-	private groupMode: 'tree' | 'date' | 'sprint' = 'tree';
+	private groupMode: 'tree' | 'topic' | 'date' | 'sprint' = 'tree';
+	private showDimEditor = false;
 	private rerender: () => void;
 
-	constructor(leaf: WorkspaceLeaf, private store: IndexStore) {
+	constructor(leaf: WorkspaceLeaf, private store: IndexStore, private plugin: ProjectItemsPlugin) {
 		super(leaf);
 		this.rerender = debounce(() => this.render(), 80, true);
 	}
@@ -131,35 +135,54 @@ export class CentralView extends ItemView {
 		const cfg = this.store.getConfig();
 		const byPath = this.store.byTreePath();
 
-		// Count items per top-level segment
-		const topCounts = new Map<string, number>();
+		// Build the full topic hierarchy with per-subtree counts, so subheadings
+		// (and "Uncategorized") each get their own drill-down row.
+		interface TopicNode { seg: string; path: string; count: number; children: Map<string, TopicNode>; }
+		const root: TopicNode = { seg: '', path: '', count: 0, children: new Map() };
 		for (const [path, items] of byPath) {
-			if (path === '') continue;
-			const top = path.split('/')[0]!;
-			topCounts.set(top, (topCounts.get(top) ?? 0) + items.length);
+			if (path === '') continue;   // items above any heading: no topic row
+			let node = root;
+			let acc = '';
+			for (const seg of path.split('/')) {
+				acc = acc === '' ? seg : `${acc}/${seg}`;
+				let next = node.children.get(seg);
+				if (!next) { next = { seg, path: acc, count: 0, children: new Map() }; node.children.set(seg, next); }
+				next.count += items.length;   // accumulate into every ancestor
+				node = next;
+			}
 		}
-		if (topCounts.size === 0) return;
+		if (root.children.size === 0) return;
 
 		const sec = sidebar.createDiv({ cls: 'pm-sidebar-section' });
-		sec.createDiv({ cls: 'pm-sidebar-label', text: 'Tree' });
+		sec.createDiv({ cls: 'pm-sidebar-label', text: 'Topic' });
 
 		const treeDimId = cfg.treeDimId;
 		const activeSet = this.filter.get(treeDimId);
 		const activeVal = activeSet && activeSet.size === 1 ? [...activeSet][0]! : undefined;
 
-		for (const [top, count] of [...topCounts.entries()].sort()) {
-			const isActive = activeVal === top;
-			const row = sec.createDiv({ cls: `pm-filter-option${isActive ? ' is-active' : ''}` });
-			const input = row.createEl('input', { cls: 'pm-filter-input', attr: { type: 'radio', name: 'pm-tree-top' } });
-			input.checked = isActive;
-			row.createSpan({ cls: 'pm-filter-label-text', text: top });
-			row.createSpan({ cls: 'pm-filter-count', text: String(count) });
-			row.addEventListener('click', () => {
-				if (isActive) this.filter.delete(treeDimId);
-				else this.filter.set(treeDimId, new Set([top]));
-				this.render();
-			});
-		}
+		// "Uncategorized" sinks to the bottom; everything else alphabetical.
+		const order = (n: TopicNode) => (n.seg === UNCATEGORIZED ? 1 : 0);
+		const renderNode = (node: TopicNode, depth: number) => {
+			const kids = [...node.children.values()].sort(
+				(a, b) => order(a) - order(b) || a.seg.localeCompare(b.seg),
+			);
+			for (const child of kids) {
+				const isActive = activeVal === child.path;
+				const row = sec.createDiv({ cls: `pm-filter-option${isActive ? ' is-active' : ''}` });
+				row.style.paddingLeft = `${depth * 14}px`;
+				const input = row.createEl('input', { cls: 'pm-filter-input', attr: { type: 'radio', name: 'pm-topic' } });
+				input.checked = isActive;
+				row.createSpan({ cls: 'pm-filter-label-text', text: child.seg });
+				row.createSpan({ cls: 'pm-filter-count', text: String(child.count) });
+				row.addEventListener('click', () => {
+					if (isActive) this.filter.delete(treeDimId);
+					else this.filter.set(treeDimId, new Set([child.path]));
+					this.render();
+				});
+				renderNode(child, depth + 1);
+			}
+		};
+		renderNode(root, 0);
 	}
 
 	private computeStats() {
@@ -234,7 +257,7 @@ export class CentralView extends ItemView {
 
 		if (s.untagged > 0) {
 			const warn = sec.createDiv({ cls: 'pm-filter-option pm-filter-warn' });
-			warn.createSpan({ cls: 'pm-filter-label-text', text: `Untagged: ${s.untagged}` });
+			warn.createSpan({ cls: 'pm-filter-label-text', text: `Unfiled: ${s.untagged}` });
 		}
 	}
 
@@ -285,18 +308,61 @@ export class CentralView extends ItemView {
 	private renderMainArea(root: HTMLElement): void {
 		const main = root.createDiv({ cls: 'pm-main' });
 		const header = main.createDiv({ cls: 'pm-main-header' });
-		const labels: Record<string, string> = { tree: 'Tree', date: 'Date', sprint: 'Sprint' };
-		for (const mode of ['tree', 'date', 'sprint'] as const) {
+		const labels: Record<string, string> = { tree: 'Outline', topic: 'Topics', date: 'Date', sprint: 'Sprint' };
+		for (const mode of ['tree', 'topic', 'date', 'sprint'] as const) {
 			const btn = header.createEl('button', {
-				cls: `pm-group-btn${this.groupMode === mode ? ' is-active' : ''}`,
+				cls: `pm-group-btn${this.groupMode === mode && !this.showDimEditor ? ' is-active' : ''}`,
 				text: labels[mode]!,
 			});
-			btn.addEventListener('click', () => { this.groupMode = mode; this.render(); });
+			btn.addEventListener('click', () => { this.showDimEditor = false; this.groupMode = mode; this.render(); });
 		}
+		// Dimensions editor toggle, pushed to the right.
+		const dimBtn = header.createEl('button', {
+			cls: `pm-group-btn pm-dim-toggle${this.showDimEditor ? ' is-active' : ''}`,
+			text: 'Dimensions',
+		});
+		dimBtn.addEventListener('click', () => { this.showDimEditor = !this.showDimEditor; this.render(); });
+
+		if (this.showDimEditor) { this.renderDimEditor(main); return; }
 
 		if (this.groupMode === 'tree') this.renderTreeView(main);
+		else if (this.groupMode === 'topic') this.renderTopicView(main);
 		else if (this.groupMode === 'date') this.renderDateView(main);
 		else this.renderSprintView(main);
+	}
+
+	// ---------- in-view dimensions editor ----------
+
+	private renderDimEditor(main: HTMLElement): void {
+		const wrap = main.createDiv({ cls: 'pm-dim-editor-wrap' });
+		const hint = wrap.createDiv({ cls: 'pm-dim-editor-hint' });
+		hint.setText('One dimension per "## Name {kind}" heading (tree, radio, checkbox, time, text, auto). Values are bullets; indent a tree bullet to make a subtopic. Empty tree = auto from headings.');
+
+		const errors = wrap.createDiv({ cls: 'pm-dim-errors' });
+		errors.style.display = 'none';
+
+		const ta = wrap.createEl('textarea', { cls: 'pm-dim-editor' });
+		ta.spellcheck = false;
+		ta.value = serializeDimensions(this.store.getConfig().dimensions);
+
+		const showErrors = (msgs: string[]) => {
+			errors.empty();
+			if (msgs.length === 0) { errors.style.display = 'none'; return; }
+			errors.style.display = '';
+			for (const m of msgs) errors.createDiv({ text: m });
+		};
+
+		const btns = wrap.createDiv({ cls: 'pm-dim-editor-btns' });
+		btns.createEl('button', { text: 'Save', cls: 'mod-cta' }).addEventListener('click', () => {
+			const { dims, errors: errs } = parseDimensionsText(ta.value);
+			if (errs.length > 0) { showErrors(errs); return; }
+			showErrors([]);
+			void this.plugin.setDimensions(dims);   // persists + re-scans; 'changed' re-renders
+		});
+		btns.createEl('button', { text: 'Revert' }).addEventListener('click', () => {
+			ta.value = serializeDimensions(this.store.getConfig().dimensions);
+			showErrors([]);
+		});
 	}
 
 	// ---------- tree grouping ----------
@@ -346,6 +412,47 @@ export class CentralView extends ItemView {
 		}
 		if (depth === 0) {
 			for (const it of node.items) this.renderItem(parent, it, 0, it.tags);
+		}
+	}
+
+	// ---------- topic grouping (merge same-named headings across the scope) ----------
+
+	private renderTopicView(main: HTMLElement): void {
+		const cfg = this.store.getConfig();
+		// Group top-level items by their innermost heading name, regardless of nesting depth,
+		// so a "## Deployment" here and a "### Deployment" elsewhere collapse into one topic.
+		const groups = new Map<string, Item[]>();
+		for (const [, items] of this.store.allFiles()) {
+			for (const item of items) {
+				if (!matchesFilter(item, cfg.dimensions, [], this.filter)) {
+					if (!hasDescendantMatching(item, cfg.dimensions, item.tags, this.filter)) continue;
+				}
+				const leaf = item.uncategorized
+					? UNCATEGORIZED
+					: (item.section.length > 0 ? item.section[item.section.length - 1]! : '');
+				const arr = groups.get(leaf) ?? [];
+				arr.push(item);
+				groups.set(leaf, arr);
+			}
+		}
+
+		if (groups.size === 0) { main.createDiv({ cls: 'pm-empty', text: 'No items match.' }); return; }
+
+		const named = [...groups.keys()].filter(k => k !== '').sort((a, b) => a.localeCompare(b));
+		for (const key of named) {
+			const section = main.createDiv({ cls: 'pm-tree-section' });
+			const hdr = section.createDiv({ cls: 'pm-tree-header' });
+			hdr.createSpan({ cls: 'pm-tree-name', text: key });
+			hdr.createSpan({ cls: 'pm-tree-count', text: ` ${groups.get(key)!.length}` });
+			for (const it of groups.get(key)!) this.renderItem(section, it, 1, it.tags);
+		}
+		const untopiced = groups.get('');
+		if (untopiced) {
+			const section = main.createDiv({ cls: 'pm-tree-section' });
+			const hdr = section.createDiv({ cls: 'pm-tree-header' });
+			hdr.createSpan({ cls: 'pm-tree-name pm-date-undated', text: '(no topic)' });
+			hdr.createSpan({ cls: 'pm-tree-count', text: ` ${untopiced.length}` });
+			for (const it of untopiced) this.renderItem(section, it, 1, it.tags);
 		}
 	}
 
@@ -467,50 +574,10 @@ export class CentralView extends ItemView {
 	}
 
 	private async stampDates(): Promise<void> {
-		const cfg = this.store.getConfig();
-		const timeDimIds = new Set(cfg.dimensions.filter(d => d.kind === 'time').map(d => d.id));
-		const dimId = cfg.dimensions.find(d => d.kind === 'time')?.id;
-		if (!dimId) { new Notice('No time dimension configured.'); return; }
-
-		const now = new Date();
-		const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-
-		// Collect top-level non-index lines needing a stamp, grouped by file path.
-		const toStamp = new Map<string, number[]>();
-		for (const [, items] of this.store.allFiles()) {
-			for (const item of items) {
-				if (item.kind === 'index') continue;
-				if (!item.meta.some(m => timeDimIds.has(m.key))) {
-					const arr = toStamp.get(item.loc.path) ?? [];
-					arr.push(item.loc.line);
-					toStamp.set(item.loc.path, arr);
-				}
-			}
-		}
-
-		if (toStamp.size === 0) { new Notice('All items already have a date.'); return; }
-
-		let count = 0;
-		const commentRe = /%%([^%]*)%%/;
-		for (const [path, lineNums] of toStamp) {
-			const file = this.app.vault.getAbstractFileByPath(path);
-			if (!(file instanceof TFile)) continue;
-			const text = await this.app.vault.read(file);
-			const lines = text.split(/\r?\n/);
-			for (const n of lineNums) {
-				if (lines[n] === undefined) continue;
-				const existing = lines[n]!.match(commentRe);
-				if (existing) {
-					// Insert inside the existing comment block.
-					lines[n] = lines[n]!.replace(commentRe, `%%${existing[1]!.trimEnd()} ${dimId}:${today} %%`);
-				} else {
-					lines[n] = lines[n]!.trimEnd() + ` %% ${dimId}:${today} %%`;
-				}
-				count++;
-			}
-			await this.app.vault.modify(file, lines.join('\n'));
-		}
-		new Notice(`Stamped ${count} item${count === 1 ? '' : 's'} with ${dimId}:${today}`);
+		const r = await stampMissingDates(this.app, this.store);
+		if (!r.hadTimeDim) { new Notice('No time dimension configured.'); return; }
+		if (r.items === 0) { new Notice('All items already have a date.'); return; }
+		new Notice(`Stamped ${r.items} item${r.items === 1 ? '' : 's'} with ${r.dimId}:${r.date}`);
 	}
 
 	private async toggleTask(item: Item): Promise<void> {

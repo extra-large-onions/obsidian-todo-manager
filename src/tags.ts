@@ -1,5 +1,8 @@
 import { ClassifiedTag, Dimension, Item } from './types';
 
+/** Reserved topic name for items sitting after a `---` separator. */
+export const UNCATEGORIZED = 'Uncategorized';
+
 export const DEFAULT_DIMENSIONS: Dimension[] = [
 	{ id: 'tree', name: 'Tree', kind: 'tree', values: [] },
 	{ id: 'type', name: 'Type', kind: 'auto', values: [] },
@@ -64,6 +67,15 @@ export function dimensionsOf(item: Item, dims: Dimension[], inheritedTags: strin
 		out.set(autoDim.id, [typeVal]);
 	}
 
+	// Heading sections are authoritative for the tree dimension (prefix-matched
+	// by matchesFilter), overriding any tag-derived tree value. An item after a
+	// `---` is "Uncategorized" regardless of the heading it sits under.
+	const treeDim = dims.find(d => d.kind === 'tree');
+	if (treeDim) {
+		if (item.uncategorized) out.set(treeDim.id, [UNCATEGORIZED]);
+		else if (item.section && item.section.length > 0) out.set(treeDim.id, [item.section.join('/')]);
+	}
+
 	return out;
 }
 
@@ -72,8 +84,15 @@ export function freeTags(item: Item, dims: Dimension[]): string[] {
 	return item.tags.filter(t => classifyTag(t, dims) === null);
 }
 
-/** Tree-dimension path for grouping. Checks tags then metadata. */
+/**
+ * Topic path for grouping. Markdown heading sections are authoritative; an
+ * item's `section` (e.g. ["Deployment", "Startup"]) becomes "Deployment/Startup".
+ * Falls back to the legacy tag/metadata tree only for items that sit above any
+ * heading (empty section), so existing tag-based vaults keep working.
+ */
 export function treePathOf(item: Item, dims: Dimension[], inheritedTags: string[], treeDimId: string): string {
+	if (item.uncategorized) return UNCATEGORIZED;
+	if (item.section && item.section.length > 0) return item.section.join('/');
 	const treeDim = dims.find(d => d.id === treeDimId);
 	if (!treeDim) return '';
 	const allTags = Array.from(new Set([...inheritedTags, ...item.tags]));

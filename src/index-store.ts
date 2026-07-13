@@ -8,6 +8,8 @@ export interface IndexConfig {
 	treeDimId: string;
 	debounceMs: number;
 	rootFolder: string;
+	scopeMode: 'all' | 'opt-in';   // 'opt-in' → only *.todo.md or frontmatter-marked files
+	optInProperty: string;         // frontmatter key that opts a file in (e.g. "todos")
 }
 
 /**
@@ -44,20 +46,29 @@ export class IndexStore extends Events {
 
 	async fullScan(): Promise<void> {
 		this.byFile.clear();
-		let files = this.plugin.app.vault.getMarkdownFiles();
-		if (this.config.rootFolder) {
-			const prefix = this.config.rootFolder + '/';
-			files = files.filter(f => f.path.startsWith(prefix));
-		}
+		const files = this.plugin.app.vault.getMarkdownFiles().filter(f => this.isScannable(f));
 		for (const f of files) {
 			await this.parseInto(f);
 		}
 		this.notifyChangedSoon();
 	}
 
-	private isInScope(path: string): boolean {
-		if (!this.config.rootFolder) return true;
-		return path.startsWith(this.config.rootFolder + '/');
+	/** Folder-scope gate only (path-based; cheap, no frontmatter lookup). */
+	private inRootScope(path: string): boolean {
+		return !this.config.rootFolder || path.startsWith(this.config.rootFolder + '/');
+	}
+
+	/**
+	 * Full scan gate: folder scope, plus (in opt-in mode) the file must be named
+	 * `*.todo.md` or carry a truthy `optInProperty` in its frontmatter.
+	 */
+	private isScannable(file: TFile): boolean {
+		if (!this.inRootScope(file.path)) return false;
+		if (this.config.scopeMode !== 'opt-in') return true;
+		if (file.path.endsWith('.todo.md')) return true;
+		const fm = this.plugin.app.metadataCache.getFileCache(file)?.frontmatter;
+		const v = fm?.[this.config.optInProperty];
+		return v !== undefined && v !== null && v !== false && v !== 'false' && v !== 0;
 	}
 
 	private async parseInto(file: TFile): Promise<void> {
@@ -71,35 +82,37 @@ export class IndexStore extends Events {
 
 	private onModify(file: TAbstractFile) {
 		if (!(file instanceof TFile) || file.extension !== 'md') return;
-		if (!this.isInScope(file.path)) return;
+		// React if the file is in the folder scope or was already indexed. Opt-in
+		// status is re-checked after the debounce, since the metadata cache can
+		// lag the modify event (e.g. just added `todos: true` to frontmatter).
+		if (!this.inRootScope(file.path) && !this.byFile.has(file.path)) return;
 		const path = file.path;
 		const existing = this.dirtyTimers.get(path);
 		if (existing !== undefined) window.clearTimeout(existing);
 		const timer = window.setTimeout(() => {
 			this.dirtyTimers.delete(path);
-			void this.parseInto(file).then(() => this.notifyChangedSoon());
+			if (this.isScannable(file)) {
+				void this.parseInto(file).then(() => this.notifyChangedSoon());
+			} else if (this.byFile.delete(path)) {
+				this.notifyChangedSoon();
+			}
 		}, this.config.debounceMs);
 		this.dirtyTimers.set(path, timer);
 	}
 
 	private onDelete(file: TAbstractFile) {
 		if (!(file instanceof TFile) || file.extension !== 'md') return;
-		if (!this.isInScope(file.path)) return;
-		this.byFile.delete(file.path);
-		this.notifyChangedSoon();
+		if (this.byFile.delete(file.path)) this.notifyChangedSoon();
 	}
 
 	private onRename(file: TAbstractFile, oldPath: string) {
 		if (!(file instanceof TFile) || file.extension !== 'md') return;
-		const newInScope = this.isInScope(file.path);
-		const oldInScope = this.isInScope(oldPath);
-		if (!newInScope && !oldInScope) return;
-		this.byFile.delete(oldPath);
-		if (!newInScope) {
+		const had = this.byFile.delete(oldPath);
+		if (this.isScannable(file)) {
+			void this.parseInto(file).then(() => this.notifyChangedSoon());
+		} else if (had) {
 			this.notifyChangedSoon();
-			return;
 		}
-		void this.parseInto(file).then(() => this.notifyChangedSoon());
 	}
 
 	private notifyChangedSoon() {
@@ -165,12 +178,12 @@ export class IndexStore extends Events {
 		return grouped;
 	}
 
-	/** Top-level items with no tags at all. */
+	/** Top-level items with no topic (heading section) and no tags — genuinely unfiled. */
 	untagged(): Item[] {
 		const out: Item[] = [];
 		for (const items of this.byFile.values()) {
 			for (const it of items) {
-				if (it.tags.length === 0) out.push(it);
+				if (it.tags.length === 0 && it.section.length === 0) out.push(it);
 			}
 		}
 		return out;
