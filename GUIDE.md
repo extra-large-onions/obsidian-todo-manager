@@ -1,6 +1,6 @@
 # Project Items — Conceptual Guide
 
-This guide explains the mental model behind the plugin. Read this before diving into settings or dimensions.
+This guide explains the mental model behind the plugin. Read this before diving into settings or dimensions — then see [the management tab](#the-management-tab), where dimensions are edited.
 
 ---
 
@@ -232,6 +232,25 @@ Four buttons at the top of the main area: **Outline**, **Topics**, **Date**, **S
 
 ---
 
+## Canvas
+
+A canvas is the same item list, laid out in space. Open a `.canvas` and the canvas panel opens with it (turn that off with **Follow canvases** in settings; the command **Open canvas view** works either way).
+
+**Cards become items.** A text card is parsed exactly like a note — `- [ ]`, `- [/]`, `%% added:… %%`, `#tags`, and headings-as-topics all mean what they mean everywhere else. A card that embeds a note shows *that note's* items, straight from the index; if it points at a heading, only that section's items count.
+
+**The toolbar** floats over the canvas:
+
+- **Filter** — every topic, dimension value, and tag actually present on this canvas, with the number of cards carrying each.
+- **Any / Open / Done** — the Type dimension: Open is `task/todo` + `task/doing`, Done is `task/done`.
+- **Find** — plain substring search across card text, filenames, URLs, and the items behind file cards.
+- **⬡** — auto-size the matching cards to one size (outliers excluded, width and height judged separately).
+
+Filtering **dims, never hides**: non-matching cards fade, matching ones glow, and nothing moves. A group stays lit while anything inside it still matches.
+
+**The sidebar** mirrors the canvas hierarchy — which group contains which card, derived from what sits inside what, not from arrows. Each row shows the number of open tasks (or ✓ when they're all closed); groups total up everything inside them. Click any row to zoom to it.
+
+---
+
 ## Tag autocomplete
 
 Type `#` inside any list line (`- `, `- [ ] `, etc.) to get tag suggestions. The popup:
@@ -254,32 +273,59 @@ Each row has a **Reveal** button that jumps to the item in its file.
 
 ---
 
-## Editing dimensions
+## The management tab
 
-Open the Project Items view and click the **Dimensions** button in the top bar (top-right). It swaps the item list for a single text box you edit directly — one markdown heading per dimension, values as bullets below:
+Everything about *how* your vault is classified lives in one tab: **Open management tab** in the command palette, the **Manage** button in the top bar of the Project Items view, or the button at the top of the plugin's settings.
+
+It has two halves. On the left you edit your dimensions as text, and set what gets indexed. On the right is an inventory of what your vault actually contains, updated as you write.
+
+### Writing dimensions
+
+Dimensions are just text, in a format that reads like the notes they describe. Short ones are one line:
 
 ```
-## Priority  {radio}
-- high
-- medium
-- low
+Priority: enum[high, medium, low]
+Due: date
+Sprint: text
+```
 
-## Sprint  {radio}
-- sprint-1
-- sprint-2
+Longer or nested ones take bullets, either under a compact line or under a heading:
 
-## Topic  {tree}
+```
+Topic: tree
 - Deployment
   - Startup
   - Shutdown
 - Audio
   - Mixing
+
+## Area  {checkbox}  (id: area)
+- backend
+- ui
 ```
 
-- **Heading line** is `## Name  {kind}`. Kinds: `tree`, `radio`, `checkbox`, `time`, `text`, `auto`. The `id` auto-slugs from the name; add `(id: foo)` to pin it (used for the default `tree`/`type`/`added`/`due` dims so renames don't break their metadata keys).
-- **Bullets** are the values. For `radio`/`checkbox` they're the exact tag values classified into this dimension. `time`/`text`/`auto` take no bullets.
-- **Tree = topics.** Indent a bullet to make it a subtopic — `Deployment → Startup` becomes the path `Deployment/Startup`. Leave a tree's bullets empty (or a comment) to **auto-discover** topics from your headings, which is the normal case.
-- Click **Save**: the text is parsed, and if anything's wrong (unknown kind, duplicate id, a value under a `time` dim, no tree dimension) it lists the errors and saves nothing. On success it persists, the vault re-scans, and the box re-renders in canonical form. **Revert** discards unsaved edits. Click **Dimensions** again (or any grouping button) to return to the item list.
+Both spellings mean the same thing and can be mixed in one document. When you save, the plugin rewrites the text in its canonical form — one-liners stay one-liners, trees keep their bullets.
+
+- **Kinds** are `tree`, `radio`, `checkbox`, `time`, `text` and `auto`, and each has aliases so you can write what reads best: `enum`/`choice`/`select`/`one` for radio, `multi`/`many`/`set`/`flags` for checkbox, `date`/`when` for time, `free`/`string` for text, `hierarchy`/`nested`/`path` for tree, `derived`/`computed` for auto.
+- **The id** is what your notes actually use — `Due` becomes the key in `%% due:2026-06-01 %%`. It is slugged from the name, so renaming a dimension renames the key. Write `Due (id: deadline): date` to pin the id and keep old metadata working through a rename. The defaults (`tree`, `type`, `added`, `due`) are pinned this way.
+- **Tree = topics.** Indent a bullet to make a subtopic — `Deployment ▸ Startup` is the path `Deployment/Startup`. A tree with no values (just `Topic: tree` on its own) auto-discovers topics from your headings, which is the normal case.
+- **Values** belong to `radio`, `checkbox` and `tree` only. A `time`, `text` or `auto` dimension takes none.
+- Blank lines, `// comments`, `<!-- comments -->` and plain headings like `# Dimensions` are ignored, so you can annotate the document freely.
+
+**Save** (or `Ctrl/Cmd+S` inside the box) parses the text. If anything is wrong — unknown kind, duplicate id, values on a `time` dimension, or no tree dimension at all — it lists the problems with line numbers and **saves nothing**. On success the vault re-scans. **Revert** throws away unsaved edits, **Copy as Markdown** puts the document on the clipboard if you want to keep a copy in a note.
+
+### Index scope
+
+Below the editor: which dimension is the topic hierarchy, which folder to scan, whether to index every note or only opt-in ones (`*.todo.md`, or a frontmatter key like `todos: true`), and what that key is called. These decide what the inventory on the right is counting, which is why they live here rather than in settings.
+
+### What's actually in your vault
+
+The right-hand column reads the index, not your declarations, so it tells you what is really there:
+
+- **Counts** — files indexed, items, tasks, open, done, and how many items have no date.
+- **Per dimension** — every value in use with the number of items (hover for the file count). If the dimension declares a value list, anything in use that isn't on the list is badged **undeclared**, and declared values nothing uses are listed underneath. That is how you spot `#hgih` three seconds after typing it.
+- **Tags no dimension claims** — your free tags. They're indexed and shown on items, just not filterable by dimension. Click one to drop it into the editor at your cursor, or use the button to append all of them as a starter `## Untriaged {checkbox}` block — neither saves until you hit Save.
+- **Metadata with no dimension** — `%% key:value %%` pairs sitting in your notes whose key matches no dimension id, with sample values. These are being ignored entirely; declare a dimension with that id to start indexing them.
 
 ---
 
@@ -299,7 +345,7 @@ Every change is previewed as a dry-run first; applying it writes a `.bak` backup
 
 ## `data.json` — where settings are stored
 
-Settings live at `.obsidian/plugins/obsidian-todos/data.json`. It is a plain JSON file editable with any text editor (close Obsidian first, or disable/re-enable the plugin after editing). The in-settings Dimensions editor is the recommended way to change dimensions; direct JSON edits work as a last resort.
+Settings live at `.obsidian/plugins/obsidian-todos/data.json`. It is a plain JSON file editable with any text editor (close Obsidian first, or disable/re-enable the plugin after editing). The management tab is the recommended way to change dimensions; direct JSON edits work as a last resort.
 
 Format reference:
 

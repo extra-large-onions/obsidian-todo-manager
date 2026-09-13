@@ -12,6 +12,11 @@ export const DEFAULT_DIMENSIONS: Dimension[] = [
 
 export const DEFAULT_TREE_DIMENSION_ID = 'tree';
 
+/** Dimension ids the parser extracts as `key:value` metadata ('auto' dims are derived). */
+export function dimensionIdsFor(dims: Dimension[]): string[] {
+	return dims.filter(d => d.kind !== 'auto').map(d => d.id);
+}
+
 /**
  * Classify a raw tag value against dimensions that have predetermined values
  * (tree, radio, checkbox). Exact match against values[]. Returns the dim id

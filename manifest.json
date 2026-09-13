@@ -3,7 +3,7 @@
 	"name": "Project Items",
 	"version": "0.1.0",
 	"minAppVersion": "0.15.0",
-	"description": "Central view of tasks, knowledge, and index lines organized by hierarchical tag dimensions.",
+	"description": "Central view of tasks, knowledge, and index lines organized by hierarchical tag dimensions — in notes and on canvases.",
 	"author": "Khan",
 	"isDesktopOnly": false
 }

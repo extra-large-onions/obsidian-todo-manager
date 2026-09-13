@@ -5,6 +5,8 @@ An Obsidian plugin that turns your notes into a filterable project view. It scan
 **Highlights**
 - **Headings are topics.** Nest headings to nest topics; items inherit the heading above them.
 - **Central view** with sidebar filtering and four groupings: Outline, Topics (merge same-named headings across the vault), Date, and Sprint.
+- **Canvas view** — the same items on a `.canvas`: a toolbar over the canvas filters cards by topic, tag, or task state (dimming, never hiding), a sidebar mirrors the group hierarchy with open/closed task counts, and file cards borrow the items already indexed for that note.
+- **Management tab** — dimensions written as text (`Priority: enum[high, medium, low]`, or a heading with nested bullets for a topic tree), next to a live inventory of every value, tag and `%% key:value %%` in the vault, with undeclared ones called out.
 - **Conceal** hides `%% … %%` metadata (and optionally `#tags`) while editing, revealing the raw line only under the cursor.
 - **AI curation, safely** — an AI can label, move, and de-duplicate items through a capability-limited CLI that mechanically refuses to edit your prose or lose data.
 

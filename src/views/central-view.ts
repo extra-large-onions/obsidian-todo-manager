@@ -3,7 +3,6 @@ import { IndexStore } from '../index-store';
 import { Dimension, Item } from '../types';
 import { UNCATEGORIZED, dimensionsOf, freeTags, matchesFilter, treePathOf } from '../tags';
 import { stampMissingDates } from '../reconcile';
-import { parseDimensionsText, serializeDimensions } from '../dimensions-format';
 import type ProjectItemsPlugin from '../main';
 
 export const VIEW_TYPE_PM_CENTRAL = 'pm-central-view';
@@ -81,7 +80,6 @@ const TYPE_TASK_VALUES: { val: string; label: string; cls: string }[] = [
 export class CentralView extends ItemView {
 	private filter = new Map<string, Set<string>>();
 	private groupMode: 'tree' | 'topic' | 'date' | 'sprint' = 'tree';
-	private showDimEditor = false;
 	private rerender: () => void;
 
 	constructor(leaf: WorkspaceLeaf, private store: IndexStore, private plugin: ProjectItemsPlugin) {
@@ -311,58 +309,19 @@ export class CentralView extends ItemView {
 		const labels: Record<string, string> = { tree: 'Outline', topic: 'Topics', date: 'Date', sprint: 'Sprint' };
 		for (const mode of ['tree', 'topic', 'date', 'sprint'] as const) {
 			const btn = header.createEl('button', {
-				cls: `pm-group-btn${this.groupMode === mode && !this.showDimEditor ? ' is-active' : ''}`,
+				cls: `pm-group-btn${this.groupMode === mode ? ' is-active' : ''}`,
 				text: labels[mode]!,
 			});
-			btn.addEventListener('click', () => { this.showDimEditor = false; this.groupMode = mode; this.render(); });
+			btn.addEventListener('click', () => { this.groupMode = mode; this.render(); });
 		}
-		// Dimensions editor toggle, pushed to the right.
-		const dimBtn = header.createEl('button', {
-			cls: `pm-group-btn pm-dim-toggle${this.showDimEditor ? ' is-active' : ''}`,
-			text: 'Dimensions',
-		});
-		dimBtn.addEventListener('click', () => { this.showDimEditor = !this.showDimEditor; this.render(); });
-
-		if (this.showDimEditor) { this.renderDimEditor(main); return; }
+		// Dimensions, tags and scope live in their own tab.
+		const dimBtn = header.createEl('button', { cls: 'pm-group-btn pm-dim-toggle', text: 'Manage' });
+		dimBtn.addEventListener('click', () => void this.plugin.openManageTab());
 
 		if (this.groupMode === 'tree') this.renderTreeView(main);
 		else if (this.groupMode === 'topic') this.renderTopicView(main);
 		else if (this.groupMode === 'date') this.renderDateView(main);
 		else this.renderSprintView(main);
-	}
-
-	// ---------- in-view dimensions editor ----------
-
-	private renderDimEditor(main: HTMLElement): void {
-		const wrap = main.createDiv({ cls: 'pm-dim-editor-wrap' });
-		const hint = wrap.createDiv({ cls: 'pm-dim-editor-hint' });
-		hint.setText('One dimension per "## Name {kind}" heading (tree, radio, checkbox, time, text, auto). Values are bullets; indent a tree bullet to make a subtopic. Empty tree = auto from headings.');
-
-		const errors = wrap.createDiv({ cls: 'pm-dim-errors' });
-		errors.style.display = 'none';
-
-		const ta = wrap.createEl('textarea', { cls: 'pm-dim-editor' });
-		ta.spellcheck = false;
-		ta.value = serializeDimensions(this.store.getConfig().dimensions);
-
-		const showErrors = (msgs: string[]) => {
-			errors.empty();
-			if (msgs.length === 0) { errors.style.display = 'none'; return; }
-			errors.style.display = '';
-			for (const m of msgs) errors.createDiv({ text: m });
-		};
-
-		const btns = wrap.createDiv({ cls: 'pm-dim-editor-btns' });
-		btns.createEl('button', { text: 'Save', cls: 'mod-cta' }).addEventListener('click', () => {
-			const { dims, errors: errs } = parseDimensionsText(ta.value);
-			if (errs.length > 0) { showErrors(errs); return; }
-			showErrors([]);
-			void this.plugin.setDimensions(dims);   // persists + re-scans; 'changed' re-renders
-		});
-		btns.createEl('button', { text: 'Revert' }).addEventListener('click', () => {
-			ta.value = serializeDimensions(this.store.getConfig().dimensions);
-			showErrors([]);
-		});
 	}
 
 	// ---------- tree grouping ----------

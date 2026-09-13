@@ -5,7 +5,9 @@ import { stampMissingDates } from './reconcile';
 import { DEFAULT_SETTINGS, PMSettings, PMSettingTab } from './settings';
 import { TagSuggest } from './suggester/tag-suggest';
 import { Dimension } from './types';
+import { CanvasView, VIEW_TYPE_PM_CANVAS } from './views/canvas-view';
 import { CentralView, VIEW_TYPE_PM_CENTRAL } from './views/central-view';
+import { ManageView, VIEW_TYPE_PM_MANAGE } from './views/manage-view';
 
 export default class ProjectItemsPlugin extends Plugin {
 	settings: PMSettings;
@@ -21,17 +23,38 @@ export default class ProjectItemsPlugin extends Plugin {
 		this.store = new IndexStore(this, this.indexConfig());
 
 		this.registerView(VIEW_TYPE_PM_CENTRAL, (leaf: WorkspaceLeaf) => new CentralView(leaf, this.store, this));
+		this.registerView(VIEW_TYPE_PM_CANVAS, (leaf: WorkspaceLeaf) => new CanvasView(leaf, this.store));
+		this.registerView(VIEW_TYPE_PM_MANAGE, (leaf: WorkspaceLeaf) => new ManageView(leaf, this.store, this));
 		this.registerEditorSuggest(new TagSuggest(this.app, this.store));
 		this.syncConcealConfig();
 		this.registerEditorExtension(concealExtension(this.concealConfig));
 
-		this.addRibbonIcon('list-checks', 'Project items', () => void this.activateView());
+		this.addRibbonIcon('list-checks', 'Project items', () => void this.activateView(VIEW_TYPE_PM_CENTRAL));
 
 		this.addCommand({
 			id: 'open-central',
 			name: 'Open central view',
-			callback: () => void this.activateView(),
+			callback: () => void this.activateView(VIEW_TYPE_PM_CENTRAL),
 		});
+
+		this.addCommand({
+			id: 'open-manage',
+			name: 'Open management tab',
+			callback: () => void this.openManageTab(),
+		});
+
+		this.addCommand({
+			id: 'open-canvas',
+			name: 'Open canvas view',
+			callback: () => void this.activateView(VIEW_TYPE_PM_CANVAS),
+		});
+
+		// The canvas surface follows the canvas you open, unless you turn that off.
+		this.registerEvent(this.app.workspace.on('file-open', file => {
+			if (file?.extension === 'canvas' && this.settings.canvasAutoOpen) {
+				void this.activateView(VIEW_TYPE_PM_CANVAS);
+			}
+		}));
 
 		this.addSettingTab(new PMSettingTab(this.app, this));
 
@@ -125,16 +148,29 @@ export default class ProjectItemsPlugin extends Plugin {
 		this.concealConfig.concealTags = this.settings.concealTags;
 	}
 
-	async activateView(): Promise<void> {
+	/** The management tab lives in the main area, not the sidebar. */
+	async openManageTab(): Promise<void> {
 		const { workspace } = this.app;
-		const existing = workspace.getLeavesOfType(VIEW_TYPE_PM_CENTRAL);
+		const existing = workspace.getLeavesOfType(VIEW_TYPE_PM_MANAGE);
+		if (existing.length > 0) {
+			await workspace.revealLeaf(existing[0]!);
+			return;
+		}
+		const leaf = workspace.getLeaf('tab');
+		await leaf.setViewState({ type: VIEW_TYPE_PM_MANAGE, active: true });
+		await workspace.revealLeaf(leaf);
+	}
+
+	async activateView(type: string = VIEW_TYPE_PM_CENTRAL): Promise<void> {
+		const { workspace } = this.app;
+		const existing = workspace.getLeavesOfType(type);
 		if (existing.length > 0) {
 			await workspace.revealLeaf(existing[0]!);
 			return;
 		}
 		const leaf = workspace.getRightLeaf(false);
 		if (!leaf) return;
-		await leaf.setViewState({ type: VIEW_TYPE_PM_CENTRAL, active: true });
+		await leaf.setViewState({ type, active: true });
 		await workspace.revealLeaf(leaf);
 	}
 }

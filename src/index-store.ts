@@ -1,6 +1,6 @@
 import { Events, Plugin, TAbstractFile, TFile } from 'obsidian';
 import { parseFile } from './parser';
-import { dimensionsOf, treePathOf } from './tags';
+import { dimensionIdsFor, dimensionsOf, treePathOf } from './tags';
 import { Dimension, Item } from './types';
 
 export interface IndexConfig {
@@ -73,9 +73,7 @@ export class IndexStore extends Events {
 
 	private async parseInto(file: TFile): Promise<void> {
 		const text = await this.plugin.app.vault.cachedRead(file);
-		const dimensionIds = this.config.dimensions
-			.filter(d => d.kind !== 'auto')
-			.map(d => d.id);
+		const dimensionIds = dimensionIdsFor(this.config.dimensions);
 		const items = parseFile(text, { dimensionIds, path: file.path });
 		this.byFile.set(file.path, items);
 	}
@@ -127,6 +125,11 @@ export class IndexStore extends Events {
 
 	allFiles(): IterableIterator<[string, Item[]]> {
 		return this.byFile.entries();
+	}
+
+	/** Top-level items parsed for one file; empty if the file isn't indexed. */
+	itemsForFile(path: string): Item[] {
+		return this.byFile.get(path) ?? [];
 	}
 
 	allTopItems(): Item[] {

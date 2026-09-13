@@ -1,6 +1,6 @@
 # Architecture — Project Items plugin
 
-A small Obsidian plugin that scans the vault for **items** (tasks, knowledge bullets, plain index lines), classifies them along configurable **dimensions**, and surfaces them in a central view with sidebar filtering and outline / topics / date / sprint grouping. The primary **topic** axis comes from **markdown headings** — an item's enclosing heading path is its topic, so no per-line topic tags need to be authored. A **conceal** editor extension hides `%%…%%` metadata (and optionally `#tags`) while writing, revealing the raw line only under the cursor. An inline **dimensions editor** in the settings tab edits dimensions as text; a **sync modal** surfaces items missing tags or timestamps; a **tag suggester** autocompletes `#tags` while writing; a **stamp** button back-fills date metadata across the vault.
+A small Obsidian plugin that scans the vault for **items** (tasks, knowledge bullets, plain index lines), classifies them along configurable **dimensions**, and surfaces them in a central view with sidebar filtering and outline / topics / date / sprint grouping. The primary **topic** axis comes from **markdown headings** — an item's enclosing heading path is its topic, so no per-line topic tags need to be authored. A **conceal** editor extension hides `%%…%%` metadata (and optionally `#tags`) while writing, revealing the raw line only under the cursor. A **management tab** edits dimensions as text and inventories every value, tag and metadata key the vault actually holds; a **sync modal** surfaces items missing tags or timestamps; a **tag suggester** autocompletes `#tags` while writing; a **stamp** button back-fills date metadata across the vault.
 
 ---
 
@@ -84,12 +84,18 @@ src/
   parser.ts             # parseFile(text, opts) -> Item[]  (pure, no IO)
   tags.ts               # classifyTag, dimensionsOf, freeTags, treePathOf, matchesFilter
   index-store.ts        # IndexStore: in-memory vault index, vault-event hookup
-  settings.ts           # PMSettings + PMSettingTab (inline dimensions editor)
-  dimensions-format.ts  # text <-> Dimension[] for the settings editor
+  settings.ts           # PMSettings + PMSettingTab (plugin behaviour only)
+  dimensions-format.ts  # text <-> Dimension[]: the dimension DSL
+  inventory.ts          # buildInventory(store): what the vault holds vs. what is declared
   reconcile.ts          # stampMissingDates(): additive auto-dating (button + background)
   main.ts               # Plugin lifecycle, commands, view/suggester registration
   views/
     central-view.ts     # Main ItemView: sidebar + tree/date/sprint main area
+    canvas-view.ts      # Canvas ItemView: hierarchy sidebar + toolbar injected over the canvas
+    manage-view.ts      # Management tab: dimension source, index scope, vault inventory
+  canvas/
+    canvas-api.ts       # Obsidian's unofficial canvas internals: data, hierarchy, sizing, zoom
+    canvas-items.ts     # Canvas nodes -> Item[]: text nodes parsed, file nodes pulled from the index
   commands/
     sync.ts             # SyncModal: untagged + untimed items with reveal
   suggester/
@@ -106,11 +112,13 @@ src/
 Vault events (modify / create / delete / rename)
         │
         ▼
-  IndexStore  ──── 'changed' event ────►  CentralView  (re-renders)
-  Map<path, Item[]>
-        │
-        │  updateConfig()
-        ◄───────────────────────────────  PMSettingTab → plugin.persist()
+  IndexStore  ──── 'changed' event ──┬──►  CentralView  (re-renders)
+  Map<path, Item[]>                  ├──►  CanvasView   (rebuilds CanvasItems)
+        │                            └──►  ManageView   (rebuilds the inventory)
+        │  updateConfig()                        ▲
+        ◄─────────────────  PMSettingTab / ManageView → plugin.persist()
+                                                 │
+                          .canvas modify ────────┘
 ```
 
 ---
@@ -198,6 +206,39 @@ Four grouping modes toggled by Outline / Topics / Date / Sprint buttons:
 
 ---
 
+## Canvas surface (`canvas/` + `views/canvas-view.ts`)
+
+A `.canvas` is a second surface over the same items — not a second data model.
+
+**Deriving items** (`CanvasItems.rebuild`):
+
+| Node type | Items come from |
+|---|---|
+| `text` | `parseFile(node.text)` — the same parser a note goes through, so statuses, `%% meta %%`, tags and headings-as-topics all behave identically |
+| `file` | `IndexStore.itemsForFile(node.file)` — already indexed; narrowed to the linked heading when the node has a `subpath` |
+| `group` | its label, plus (for filtering and counts) everything geometrically inside it |
+| `link` | nothing |
+
+Text-node items get the synthetic path `<canvas path>#<node id>`; they have no line address in a file, so nothing writes back to them.
+
+**Filtering.** `CanvasFilter` is the central view's `Map<dimId, Set<value>>` plus a free-tag set and a text query. A node matches when **any** of its items passes `matchesFilter`; a group matches when anything inside it matches. The toolbar's Any/Open/Done buttons are just the `auto` (Type) dimension: `task/todo`+`task/doing` and `task/done`. Non-matching nodes get `pmc-node-dimmed`, matching ones `pmc-node-active` — nothing is ever hidden, so the layout you built stays put.
+
+**Hierarchy** is containment, not edges: a node's parent is its *smallest enclosing group* (`buildHierarchy`). Rows carry a task pip fed by parsed items (open count, or ✓), and collapsed groups persist across refreshes in the view's `collapsedGroups` set.
+
+**Refresh.** `vault.on('modify')` for the active canvas path (a canvas rewrites its file on every edit) plus `store.on('changed')` for file nodes, both through a 150 ms debounce — no polling. A `MutationObserver` on the canvas wrapper re-applies dimming when canvas virtualisation re-adds node elements (60 ms debounce). A 4 s interval refreshes only the selection count, which has no event to hook.
+
+**Fragile points** — all of `canvas-api.ts` rides on unofficial internals, typed as optional members so a missing one degrades quietly:
+
+| Surface | Risk |
+|---|---|
+| `canvas.importData` / `setData` | name differs across versions; both attempted |
+| `canvas.wrapperEl` | falls back to `canvasEl.parentElement` |
+| `canvas.zoomToBbox`, `canvas.selection` | no public equivalent |
+| `.canvas-node` class | internal; could be renamed |
+| virtualisation | observer covers the common cases; brief flicker possible |
+
+---
+
 ## Tag suggester (`tag-suggest.ts`)
 
 `TagSuggest extends EditorSuggest` fires when `#` is typed inside a list-item line.
@@ -222,15 +263,45 @@ Config is a single stable `ConcealConfig` object held on the plugin and mutated 
 
 ---
 
-## Dimensions editor (`dimensions-format.ts` + `central-view.ts`)
+## Management tab (`views/manage-view.ts`)
 
-Dimensions are edited **in the central view**, not in settings. The main header has a **Dimensions** toggle (`showDimEditor`); when on, `renderDimEditor` replaces the grouping with a monospace `<textarea>` seeded by `serializeDimensions(store.getConfig().dimensions)`. **Save** runs `parseDimensionsText`, and on zero errors calls `plugin.setDimensions(dims)` — which replaces `settings.dimensions`, repairs `treeDimId` if it vanished, and `persist()`s (→ `store.updateConfig()` → full re-scan → `'changed'` → view re-renders in canonical form). **Revert** re-seeds from the current config. The Settings tab only points here.
+A main-area `ItemView` (`pm-manage-view`, icon `sliders-horizontal`), opened by the **Open management tab** command, the **Manage** button in the central view header, or the button at the top of Settings. Two columns: the dimension source on the left, a live inventory of the vault on the right.
 
-Format (`dimensions-format.ts`):
-- One dimension per heading: `## Name  {kind}` with optional `(id: foo)`. `id` auto-slugs from name; an explicit id is emitted only when it differs from the slug (i.e. the protected `tree`/`type`/`added`/`due` dims), so a rename never breaks a metadata key.
-- Values are bullets. `radio`/`checkbox`: flat, deduped. `tree`: indentation → a `/`-joined path via the same indent-stack the item parser uses (`Deployment` ▸ `Startup` → `Deployment/Startup`); an empty tree serializes to an `<!-- auto-discovered -->` comment and parses back to `[]`. `time`/`text`/`auto` reject bullets.
-- `parseDimensionsText` never throws — it returns `{ dims, errors[] }`. Errors: bad/duplicate/missing id, unknown kind, value under a valueless kind, orphan bullet, and **no tree dimension** (structural invariant). Any error blocks the save.
-- Serialize→parse is idempotent after the first normalization (parsing expands tree parents into their own entries; re-serializing reproduces the same text).
+**Left — source + scope.** A monospace `<textarea>` seeded with `serializeDimensions(store.getConfig().dimensions)`, a collapsible format cheatsheet generated from `KIND_ALIASES`, and the four index-scope settings (`treeDimId`, `rootFolder`, `scopeMode`, `optInProperty`) as ordinary `Setting` rows — they shape *what gets indexed*, so they sit next to the inventory rather than in the settings tab. **Save** (button or `Ctrl/Cmd+S` in the textarea) runs `parseDimensionsText`; on zero errors it calls `plugin.setDimensions(dims)` → `persist()` → `store.updateConfig()` → full re-scan → `'changed'`. Any error blocks the save and lists line numbers. The draft is compared against the serialized config to drive an "unsaved changes" badge; a `'changed'` event re-syncs the textarea **only when the draft is clean**, so a background re-scan never eats what you are typing.
+
+**Right — inventory** (`inventory.ts`, rebuilt on every `'changed'`, debounced 120 ms). `buildInventory(store)` walks `allItemsWithInheritance()` once and produces:
+- counts — files, items, tasks, open, done, undated;
+- per dimension, every value actually present with item/file counts, flagged `undeclared` when the dimension declares a value list that does not include it, plus the declared values nothing uses;
+- **free tags** — `freeTags()` per item: tags no dimension claims. Clicking one inserts `- tag` at the cursor in the editor; a button appends all of them as an `## Untriaged {checkbox}` block. Neither saves by itself;
+- **unknown metadata** — `%% key:value %%` pairs scanned straight out of `item.rawText` whose key is not a dimension id. `parser.ts` only extracts declared ids, so these are otherwise invisible; each row carries up to 5 sample values.
+
+Scroll position survives an inventory rebuild; the scope rows are rebuilt only after a save, since the tree-dimension dropdown depends on the dimension list.
+
+---
+
+## Dimension DSL (`dimensions-format.ts`)
+
+Two interchangeable spellings, both plain markdown:
+
+```
+Priority: enum[high, medium, low]      <- compact: one line
+Due: date
+
+Topic: tree                            <- compact head, bullets below
+- Deployment
+  - Startup                            -> Deployment/Startup
+
+## Area  {checkbox}  (id: area)        <- block form
+- backend
+- ui
+```
+
+- **Kinds** accept aliases (`resolveKind`): `tree|hierarchy|nested|path`, `radio|enum|choice|select|one`, `checkbox|multi|many|set|flags`, `time|date|when`, `text|free|string`, `auto|derived|computed`. Serialization always writes the canonical name.
+- **Ids** auto-slug from the name and are the metadata key used in notes (`%% due:… %%`). `(id: foo)` before the colon (or after `{kind}` in block form) pins one, and is emitted only when it differs from the slug — so a rename never breaks existing metadata.
+- **Values**: `radio`/`checkbox` flat and deduped; `tree` indentation → a `/`-joined path via the same indent-stack the item parser uses; `time`/`text`/`auto` reject values.
+- **Parse precedence** per line: a `#` heading (one without `{kind}` is just a title, and closes the current dimension) → a bullet inside a values-taking dimension is a *value* → otherwise a compact definition, bulleted or bare. A compact line with `[…]` is complete; one without stays open so bullets can follow. A compact line therefore also ends a preceding block, which is what lets mixed documents round-trip.
+- **Serialization** picks compact for one-liners (no values, or a flat list ≤ 72 chars with no `,`/`]` inside a value) and block form otherwise, including any non-empty tree. `parse(serialize(dims))` is stable.
+- `parseDimensionsText` never throws — `{ dims, errors[] }`. Errors: unknown kind, duplicate or underivable id, values on a valueless kind, a line that is neither form, and **no tree dimension** (structural invariant).
 
 ---
 
@@ -250,7 +321,7 @@ Persisted in `data.json` via `loadData` / `saveData`:
 
 | Field | Description |
 |-------|-------------|
-| `dimensions` | `{ id, name, kind, values[] }[]`. Edited in the central view's Dimensions panel (`dimensions-format.ts`). |
+| `dimensions` | `{ id, name, kind, values[] }[]`. Edited as text in the management tab (`dimensions-format.ts`). |
 | `treeDimId` | Which dimension id drives tree grouping. Must be `tree` kind. |
 | `debounceMs` | Per-file modify debounce (default 250 ms). |
 | `rootFolder` | Only files under this path are indexed. Leave blank for whole vault. |
@@ -261,7 +332,7 @@ Persisted in `data.json` via `loadData` / `saveData`:
 | `autoStamp` | Background reconciler: auto-append a date to un-dated items (default false). |
 | `autoStampIntervalMinutes` | Periodic sweep interval while `autoStamp` is on (default 60). |
 
-The Settings tab exposes `treeDimId` (dropdown), `debounceMs`, `rootFolder`, the scope mode + opt-in key, the two conceal toggles, and the auto-stamp toggle + interval. Dimensions are edited in the central view (see above), so Settings only links there.
+Split by what they govern. The **management tab** owns the data model: `dimensions` (as text) plus `treeDimId`, `rootFolder`, `scopeMode` and `optInProperty` — the four that decide what gets indexed and how it is grouped. The **settings tab** keeps plugin behaviour: `debounceMs`, the two conceal toggles, the auto-stamp toggle + interval, and `canvasAutoOpen`, with a button that opens the management tab. Both write through `plugin.persist()`, so either path re-arms the reconciler and re-scans.
 
 ---
 
@@ -283,12 +354,12 @@ Background sweeps are silent (no `Notice`); the manual button reports a count.
 
 ## Lifecycle
 
-`onload()` registers the view, editor suggester, the `active-leaf-change` reconciler hook, and settings tab. `onunload()` is empty — teardown handled by `register*` helpers (the interval via `registerInterval`).
+`onload()` registers all three views, the editor suggester, the `active-leaf-change` reconciler hook, the `file-open` canvas hook (gated by `canvasAutoOpen`), and the settings tab. `onunload()` is empty — teardown handled by `register*` helpers (the interval via `registerInterval`); `CanvasView.onClose` removes its toolbar and clears canvas decoration.
 
 Commands:
 - **Open central view** — opens/reveals the right-panel view
-
-(Dimensions are edited in the settings tab, so there is no dimension-manager command.)
+- **Open canvas view** — opens/reveals the canvas panel (also opens itself when you open a `.canvas`, unless "Follow canvases" is off)
+- **Open management tab** — opens/reveals the dimension + inventory tab in the main area (`workspace.getLeaf('tab')`, not the sidebar)
 
 ---
 

@@ -14,6 +14,7 @@ export interface PMSettings {
 	concealTags: boolean;              // also hide inline #tags in the editor
 	autoStamp: boolean;                // background reconciler: auto-add a date to un-dated items
 	autoStampIntervalMinutes: number;  // periodic sweep interval
+	canvasAutoOpen: boolean;           // reveal the canvas view whenever a .canvas is opened
 }
 
 export const DEFAULT_SETTINGS: PMSettings = {
@@ -27,6 +28,7 @@ export const DEFAULT_SETTINGS: PMSettings = {
 	concealTags: false,
 	autoStamp: false,
 	autoStampIntervalMinutes: 60,
+	canvasAutoOpen: true,
 };
 
 export class PMSettingTab extends PluginSettingTab {
@@ -39,17 +41,12 @@ export class PMSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName('Tree dimension')
-			.setDesc('Dimension used for hierarchical grouping in the central view.')
-			.addDropdown(dd => {
-				for (const d of this.plugin.settings.dimensions) {
-					if (d.kind === 'tree') dd.addOption(d.id, d.name);
-				}
-				dd.setValue(this.plugin.settings.treeDimId);
-				dd.onChange(async v => {
-					this.plugin.settings.treeDimId = v;
-					await this.plugin.persist();
-				});
+			.setName('Dimensions, tags and index scope')
+			.setDesc('Dimensions, the folders and files that get indexed, and an inventory of every tag and metadata key in the vault live in their own tab.')
+			.addButton(b => {
+				b.setButtonText('Open management tab')
+					.setCta()
+					.onClick(() => void this.plugin.openManageTab());
 			});
 
 		new Setting(containerEl)
@@ -89,43 +86,6 @@ export class PMSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
-			.setName('Root folder')
-			.setDesc('Scan only this folder and its subfolders. Leave blank to scan the whole vault.')
-			.addText(t => {
-				t.setPlaceholder('Projects/work')
-					.setValue(this.plugin.settings.rootFolder);
-				t.onChange(async v => {
-					this.plugin.settings.rootFolder = v.trim().replace(/\/$/, '');
-					await this.plugin.persist();
-				});
-			});
-
-		new Setting(containerEl)
-			.setName('Which files count')
-			.setDesc('All markdown files, or only files that opt in (named *.todo.md, or with the frontmatter key below).')
-			.addDropdown(dd => {
-				dd.addOption('all', 'All markdown files');
-				dd.addOption('opt-in', 'Opt-in files only');
-				dd.setValue(this.plugin.settings.scopeMode);
-				dd.onChange(async v => {
-					this.plugin.settings.scopeMode = v as PMSettings['scopeMode'];
-					await this.plugin.persist();
-				});
-			});
-
-		new Setting(containerEl)
-			.setName('Opt-in frontmatter key')
-			.setDesc('In opt-in mode, a file is scanned if this frontmatter key is truthy (e.g. "todos: true") — or its name ends with .todo.md.')
-			.addText(t => {
-				t.setPlaceholder('todos')
-					.setValue(this.plugin.settings.optInProperty);
-				t.onChange(async v => {
-					this.plugin.settings.optInProperty = v.trim() || 'todos';
-					await this.plugin.persist();
-				});
-			});
-
-		new Setting(containerEl)
 			.setName('Auto-add dates')
 			.setDesc('Occasionally append today\'s date to items that have none (at startup, on a timer, and when you leave a file). Only adds a hidden %% added:DATE %% comment — never edits your text.')
 			.addToggle(t => {
@@ -150,6 +110,15 @@ export class PMSettingTab extends PluginSettingTab {
 				});
 			});
 
-		containerEl.createEl('p', { cls: 'setting-item-description', text: 'Dimensions are edited in the Project Items view — open it and click the "Dimensions" button.' });
+		new Setting(containerEl)
+			.setName('Follow canvases')
+			.setDesc('Open the canvas view automatically when you open a .canvas file. The toolbar over the canvas appears either way once the view is open.')
+			.addToggle(t => {
+				t.setValue(this.plugin.settings.canvasAutoOpen);
+				t.onChange(async v => {
+					this.plugin.settings.canvasAutoOpen = v;
+					await this.plugin.persist();
+				});
+			});
 	}
 }
